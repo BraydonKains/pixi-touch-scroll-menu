@@ -1,0 +1,246 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<title>Scrolling Example</title>
+<script src="pixi.js"></script>
+<!--<script src="script.js"></script>-->
+</head>
+<body>
+<script>
+/*
+Panel Momentum Scrolling
+v0.2  
+*/
+
+//constants
+var panelCount=5;
+var rendererY=window.innerHeight;
+var rendererX=window.innerWidth;
+var xCenter=rendererX/2;
+var yCenter=rendererY/2;
+var xOffset=500; //this can be update to change how close together images are, but overlapping isn't properly implemented yet
+
+var renderer = PIXI.autoDetectRenderer(rendererX, rendererY);
+document.body.appendChild(renderer.view);
+
+// create the root of the scene graph
+var stage = new PIXI.Container();
+
+// create a texture from an image path
+var texture = PIXI.Texture.fromImage('tester.png');
+// currently there's only support for one texture for each panel, perhaps I'll implement multiple textures at a later date
+
+// create each panel
+function loadPanels() {
+	for (var i = 0; i < panelCount; i++)
+	{
+		createPanel(xCenter+(i*xOffset), yCenter);
+	}
+}
+
+function createPanel(x, y)
+{
+    // create new panel
+    var newSprite = new PIXI.Sprite(texture);
+
+    // enable the panel to be interactive
+    newSprite.interactive = true;
+
+    // this button mode will mean the hand cursor appears when you roll over the panel with your mouse
+    newSprite.buttonMode = true;
+
+    // center the panel's anchor point
+    newSprite.anchor.set(0.5);
+
+    /*
+	This initializes all the event callbacks.
+	The way this was structured was so mouse and touch events would be completely synonymous with each other.
+	*/	
+    newSprite
+        // events for drag start
+        .on('mousedown', onDragStart)
+        .on('touchstart', onDragStart)
+        // events for drag end
+        .on('mouseup', onDragEnd)
+        .on('mouseupoutside', onDragEnd)
+        .on('touchend', onDragEnd)
+        .on('touchendoutside', onDragEnd)
+        // events for drag move
+        .on('mousemove', onDragMove)
+        .on('touchmove', onDragMove);
+
+    // move the sprite to its designated position
+    newSprite.position.x = x;
+    newSprite.position.y = y;
+
+    // add it to the stage
+    stage.addChild(newSprite);
+}
+
+loadPanels();
+//automatically renders everything at 60fps
+requestAnimationFrame( animate );
+
+function animate() {
+
+    requestAnimationFrame(animate);
+
+    // render the stage
+    renderer.render(stage);
+}
+
+//contains panel indexes of panels to the right of center, panels to the left of center, and the panel in the center
+var left = [];
+var right = [];
+var center = null;
+
+function updatePos() {
+	var centerFound = false;
+	//empty left and right lists
+	left = [];
+	right = [];
+	for(var i=0; i<panelCount; i++){
+		//get panel position
+		var thisPanelPos = stage.getChildAt(i).position.x;
+		//allocate it accordingly (left, right, or center)
+		if(thisPanelPos<xCenter){
+			left.push(i);
+		} else if(thisPanelPos>xCenter){
+			right.push(i);
+		} else {
+			center=i;
+			centerFound=true;
+		}
+	}
+	//if there is no center, nullify the center variable
+	if(!centerFound){
+		center=null;
+	}
+}
+
+var lastDirection=null;
+
+function onDragStart(event)
+{
+    //store a reference to the data
+    //the reason for this is because of multitouch
+    //we want to track the movement of this particular touch
+    this.data = event.data;
+	this.last = this.data.getLocalPosition(this.parent);
+	this.start = this.last;
+	//scale the image slightly to indicate if its selected
+	//if you don't want this I can remove it, or if you'd like it to stay I'll find a way to smoothly animate the image growing
+	this.scale.set(1.1);
+	updatePos();
+    this.dragging = true;
+}
+
+
+function onDragMove()
+{
+    if (this.dragging)
+    {
+		//find the amount to alter the panel positions by
+        var positionOffset = this.last.x - this.data.getLocalPosition(this.parent).x;
+		//alter each panel's position by offset
+        for(var i=0; i<panelCount; i++){
+			stage.getChildAt(i).position.x -= positionOffset;
+		}
+		//move panel vertically
+		var yOffset = this.last.y - this.data.getLocalPosition(this.parent).y;
+		this.position.y-=yOffset;
+		//alter the last property to keep track distance of the swipe's movement at every frame 
+		this.last=this.data.getLocalPosition(this.parent);
+		//update lastDirection so when the drag end's we know which way to center the panels
+		lastDirection=positionOffset>0 ? 'l':'r';
+    }
+}
+
+function removePanel(up, index) {
+	//take the panel that's being removed
+	panel=stage.getChildAt(index);
+	//move panel up/down off the screen (this doesn't look like anything cause it runs so fast right now)
+	if(up){
+		while(panel.position.y<=rendererY) {
+			panel.position.y+=1;
+		}
+	} else {
+		while(panel.position.y>=-rendererY) {
+			panel.position.y-=1;
+		}
+	}
+	//remove the panel from existence
+	stage.removeChildAt(index);
+	//if we removed one of the middle panels, shift all panels to the right of it over to compensate for the space
+	if(index!=panelCount-1 && index!=0){
+		while(stage.getChildAt(index).position.x>stage.getChildAt(index-1).position.x+xOffset) {
+			for(var i=index; i<panelCount-1; i++){
+				stage.getChildAt(i).position.x-=1;
+			}
+		}
+		lastDirection='l';
+	} else if(index==panelCount-1){
+		//if we removed the last panel, we make sure everything shifts to the right
+		lastDirection='r';
+	} else {
+		//otherwise we make sure it shifts to the left
+		lastDirection='l';
+	}
+	//register that a panel has been removed
+	panelCount-=1;
+}
+
+function onDragEnd(){
+    this.dragging = false;
+	//reset scale to original size
+	this.scale.set(1);
+	//check for a vertical swipe
+	if(this.last.y<this.start.y-100) {
+		removePanel(false, stage.getChildIndex(this));
+	} else if(this.last.y>this.start.y+100) {
+		removePanel(true, stage.getChildIndex(this));
+	} else {
+		this.position.y=yCenter;
+	}
+	//update the position of the sprites at the immediate end of the drag
+	updatePos();
+	/*
+	The following code will center the next panel to the right/left (depending on swipe).
+	It also accounts for the end of the list of panels, and will not allow the user to scroll past it.
+	*/
+	//will either be -1 or 1 (left or right)
+	var offset=null;
+	if(lastDirection=='r') {
+		//if there are no panels on the left, then the closest is the first panel and must be recentered the opposite way
+		if(left.length==0){
+			offset = -0.5;
+		}
+		//otherwise recenter to the right
+		else {
+			offset = 0.5;
+		}
+	} else if(lastDirection=='l'){
+		//vice versa of if
+		if(right.length==0){
+			offset = 0.5;
+		}
+		else {
+			offset = -0.5;
+		}
+	}
+	while(center==null) {
+		for(var i=0; i<panelCount; i++){
+			//iterate through the sprites and update their position by the offset
+			stage.getChildAt(i).position.x += offset;
+		}
+		//update position to keep track of when we're at center
+		updatePos();
+	}
+    //nullify interaction data
+	this.last = null;
+    this.data = null;
+	lastDirection=null;
+}
+</script>
+</body>
+</html>
